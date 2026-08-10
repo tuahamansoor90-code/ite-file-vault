@@ -3,18 +3,84 @@ import { Lock, KeyRound, LogOut, Shield, Fingerprint } from "lucide-react";
 import { toast } from "sonner";
 import logoAsset from "@/assets/logo.png";
 
-const STORAGE_KEY = "itx-vault-auth";
-const PASSWORD_KEY = "itx-vault-password";
-const DEFAULT_PASSWORD = "admin123";
+const STORAGE_KEY      = "itx-vault-auth";
+const PASSWORD_KEY     = "itx-vault-password";
+const FAILS_KEY        = "itx-vault-fails";
+const LOCKOUT_KEY      = "itx-vault-lockout";
+const SESSION_TS_KEY   = "itx-vault-session-ts";
 
-function getStoredPassword(): string {
-  if (typeof window === "undefined") return DEFAULT_PASSWORD;
-  return window.localStorage.getItem(PASSWORD_KEY) ?? DEFAULT_PASSWORD;
+const MAX_ATTEMPTS     = 3;
+const LOCKOUT_MS       = 30_000;          // 30 seconds
+const SESSION_DURATION = 8 * 60 * 60_000; // 8 hours
+
+// ── Hashing ────────────────────────────────────────────────────────────────────
+async function sha256(text: string): Promise<string> {
+  const buf = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(text),
+  );
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
+// Default password hash for "admin123" — never store plain text
+const DEFAULT_HASH = "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a";
+
+function getStoredHash(): string {
+  if (typeof window === "undefined") return DEFAULT_HASH;
+  return window.localStorage.getItem(PASSWORD_KEY) ?? DEFAULT_HASH;
+}
+
+// ── Brute-force helpers ────────────────────────────────────────────────────────
+function getFailedAttempts(): number {
+  return parseInt(window.localStorage.getItem(FAILS_KEY) ?? "0", 10);
+}
+
+function getLockoutUntil(): number {
+  return parseInt(window.localStorage.getItem(LOCKOUT_KEY) ?? "0", 10);
+}
+
+function recordFailedAttempt(): { locked: boolean; remaining: number } {
+  const fails = getFailedAttempts() + 1;
+  window.localStorage.setItem(FAILS_KEY, String(fails));
+  if (fails >= MAX_ATTEMPTS) {
+    const until = Date.now() + LOCKOUT_MS;
+    window.localStorage.setItem(LOCKOUT_KEY, String(until));
+    window.localStorage.setItem(FAILS_KEY, "0");
+    return { locked: true, remaining: 0 };
+  }
+  return { locked: false, remaining: MAX_ATTEMPTS - fails };
+}
+
+function clearFailedAttempts() {
+  window.localStorage.removeItem(FAILS_KEY);
+  window.localStorage.removeItem(LOCKOUT_KEY);
+}
+
+// ── Session helpers ────────────────────────────────────────────────────────────
+function isSessionValid(): boolean {
+  const authed = window.localStorage.getItem(STORAGE_KEY) === "1";
+  if (!authed) return false;
+  const ts = parseInt(window.localStorage.getItem(SESSION_TS_KEY) ?? "0", 10);
+  if (Date.now() - ts > SESSION_DURATION) {
+    window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(SESSION_TS_KEY);
+    return false;
+  }
+  return true;
+}
+
+function setSession() {
+  window.localStorage.setItem(STORAGE_KEY, "1");
+  window.localStorage.setItem(SESSION_TS_KEY, String(Date.now()));
+}
+
+// ── Public exports ─────────────────────────────────────────────────────────────
 export function logout() {
   if (typeof window !== "undefined") {
     window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(SESSION_TS_KEY);
     window.location.reload();
   }
 }
@@ -32,52 +98,100 @@ export function LogoutButton() {
   );
 }
 
+// ── AuthGate ───────────────────────────────────────────────────────────────────
 export function AuthGate({ children }: { children: ReactNode }) {
-  const [ready, setReady] = useState(false);
-  const [authed, setAuthed] = useState(false);
-  const [password, setPassword] = useState("");
-  const [changing, setChanging] = useState(false);
-  const [newPassword, setNewPassword] = useState("");
+  const [ready, setReady]               = useState(false);
+  const [authed, setAuthed]             = useState(false);
+  const [password, setPassword]         = useState("");
+  const [changing, setChanging]         = useState(false);
+  const [newPassword, setNewPassword]   = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [lockoutSecs, setLockoutSecs]   = useState(0);
 
+  // Check session validity on mount
   useEffect(() => {
-    setAuthed(window.localStorage.getItem(STORAGE_KEY) === "1");
+    if (typeof window === "undefined") return;
+    setAuthed(isSessionValid());
     setReady(true);
   }, []);
+
+  // Lockout countdown timer
+  useEffect(() => {
+    const until = getLockoutUntil();
+    if (until <= Date.now()) return;
+    const remaining = Math.ceil((until - Date.now()) / 1000);
+    setLockoutSecs(remaining);
+    const interval = setInterval(() => {
+      const secs = Math.ceil((getLockoutUntil() - Date.now()) / 1000);
+      if (secs <= 0) {
+        setLockoutSecs(0);
+        clearInterval(interval);
+      } else {
+        setLockoutSecs(secs);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Session expiry watcher — check every minute while app is open
+  useEffect(() => {
+    if (!authed) return;
+    const interval = setInterval(() => {
+      if (!isSessionValid()) {
+        toast.error("Session expired. Please log in again.");
+        setAuthed(false);
+      }
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, [authed]);
 
   if (!ready) return <div className="min-h-screen bg-background" aria-hidden />;
   if (authed) return <>{children}</>;
 
-  const handleLogin = (e: FormEvent) => {
+  const isLocked = lockoutSecs > 0;
+
+  const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
-    if (password === getStoredPassword()) {
-      window.localStorage.setItem(STORAGE_KEY, "1");
+    if (isLocked) return;
+
+    const hash = await sha256(password);
+    if (hash === getStoredHash()) {
+      clearFailedAttempts();
+      setSession();
       setAuthed(true);
       toast.success("Welcome back");
     } else {
-      toast.error("Incorrect password");
+      const { locked, remaining } = recordFailedAttempt();
       setPassword("");
+      if (locked) {
+        setLockoutSecs(Math.ceil(LOCKOUT_MS / 1000));
+        toast.error(`Too many failed attempts. Locked for ${LOCKOUT_MS / 1000} seconds.`);
+      } else {
+        toast.error(`Incorrect password. ${remaining} attempt${remaining !== 1 ? "s" : ""} remaining.`);
+      }
     }
   };
 
-  const handleChangePassword = (e: FormEvent) => {
+  const handleChangePassword = async (e: FormEvent) => {
     e.preventDefault();
-    if (password !== getStoredPassword()) {
+    const currentHash = await sha256(password);
+    if (currentHash !== getStoredHash()) {
       toast.error("Current password is incorrect");
       return;
     }
-    if (newPassword.length < 4) {
-      toast.error("New password must be at least 4 characters");
+    if (newPassword.length < 8) {
+      toast.error("New password must be at least 8 characters");
       return;
     }
     if (newPassword !== confirmPassword) {
       toast.error("Passwords do not match");
       return;
     }
-    window.localStorage.setItem(PASSWORD_KEY, newPassword);
-    window.localStorage.setItem(STORAGE_KEY, "1");
+    const newHash = await sha256(newPassword);
+    window.localStorage.setItem(PASSWORD_KEY, newHash);
+    setSession();
     setAuthed(true);
-    toast.success("Password updated");
+    toast.success("Password updated successfully");
   };
 
   return (
@@ -166,6 +280,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
               </p>
             </div>
 
+            {/* Lockout banner */}
+            {isLocked && (
+              <div className="mb-4 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                <Shield className="h-4 w-4 shrink-0" />
+                <span>Too many attempts. Try again in <strong>{lockoutSecs}s</strong>.</span>
+              </div>
+            )}
+
             {!changing ? (
               <form onSubmit={handleLogin} className="space-y-4">
                 <div className="relative">
@@ -178,13 +300,15 @@ export function AuthGate({ children }: { children: ReactNode }) {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Enter password"
-                    className="w-full rounded-lg border border-input bg-background/80 py-2.5 pl-10 pr-4 text-sm text-foreground outline-none ring-offset-background transition-all placeholder:text-muted-foreground/50 focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:bg-background"
+                    disabled={isLocked}
+                    className="w-full rounded-lg border border-input bg-background/80 py-2.5 pl-10 pr-4 text-sm text-foreground outline-none ring-offset-background transition-all placeholder:text-muted-foreground/50 focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:bg-background disabled:opacity-50 disabled:cursor-not-allowed"
                   />
                 </div>
 
                 <button
                   type="submit"
-                  className="group relative inline-flex w-full items-center justify-center gap-2 overflow-hidden rounded-lg bg-gradient-to-r from-primary to-primary/90 px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/20 transition-all hover:shadow-primary/30 hover:scale-[1.01] active:scale-[0.99]"
+                  disabled={isLocked}
+                  className="group relative inline-flex w-full items-center justify-center gap-2 overflow-hidden rounded-lg bg-gradient-to-r from-primary to-primary/90 px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/20 transition-all hover:shadow-primary/30 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                 >
                   <KeyRound className="h-4 w-4 transition-transform group-hover:rotate-12" />
                   Unlock Vault
@@ -201,14 +325,6 @@ export function AuthGate({ children }: { children: ReactNode }) {
                   >
                     Change password
                   </button>
-                  <div className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2">
-                    <span className="text-[10px] text-muted-foreground/70">
-                      Default:
-                    </span>
-                    <code className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
-                      admin123
-                    </code>
-                  </div>
                 </div>
               </form>
             ) : (
@@ -234,7 +350,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
                     type="password"
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="New password (min 4 chars)"
+                    placeholder="New password (min 8 characters)"
                     className="w-full rounded-lg border border-input bg-background/80 py-2.5 pl-10 pr-4 text-sm text-foreground outline-none ring-offset-background transition-all placeholder:text-muted-foreground/50 focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:bg-background"
                   />
                 </div>
