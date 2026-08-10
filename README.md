@@ -8,12 +8,16 @@ A modern Electron-based desktop app with a React 19 frontend, cloud-synced datab
 
 ## ✨ Features
 
-- **📁 File Index** — Add, search, filter, and track files with status badges (Pending, In Progress, Completed, etc.)
-- **👥 Employee Management** — Full employee profiles with add/edit forms, analytics panel, and shareable form links (QR code)
-- **📊 Analytics Dashboards** — Visual charts (Recharts) for both file and employee data
-- **📥 Import / Export** — Import records from Excel/CSV and export data back to Excel (via `xlsx`)
-- **🔐 Auth Gate** — Supabase-powered authentication to protect access
-- **💻 Standalone Executable** — Packaged with Electron Packager as a Windows `.exe`
+- **📁 File Index** — Add, search, and track physical files with fields: File Code, Document Title, Department, Cabinet Number, Row, Side, Full Location Code, and Year
+- **🔄 Status Tracking** — Per-file status: Available, Issued, Lost, Archived, Record Room — with full issue/return history (issued to, issue date, expected return, returned date, note)
+- **⚠️ Overdue Detection** — Automatically flags files that have passed their expected return date
+- **👥 Employee Management** — Add, edit, delete, and search employee records (Employee ID, Name, CNIC, Department, Designation, Email, Contact)
+- **🔗 Shareable Employee Form** — Generate a public link + QR code so employees can fill in their own data remotely
+- **📊 Analytics Dashboard** — Live stats: Issued Today, Returned Today, Overdue count, Lost files, and a current holders list (who is holding which files)
+- **📥 Import / Export** — Bulk import file and employee records from Excel (`.xlsx`) and export a full backup to Excel
+- **🔐 Auth Gate** — Supabase-powered login to protect all data
+- **☁️ Offline + Cloud Sync** — Data cached locally in localStorage for offline use; syncs to Supabase cloud when online
+- **💻 Standalone Executable** — Packaged with Electron Packager as a Windows `.exe` — no installation required
 
 ---
 
