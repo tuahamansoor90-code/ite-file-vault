@@ -11,11 +11,8 @@ A modern Electron-based desktop app with a React 19 frontend, cloud-synced datab
 - **📁 File Index** — Add, search, filter, and track files with status badges (Pending, In Progress, Completed, etc.)
 - **👥 Employee Management** — Full employee profiles with add/edit forms, analytics panel, and shareable form links (QR code)
 - **📊 Analytics Dashboards** — Visual charts (Recharts) for both file and employee data
-- **🤖 AI Assistant** — Built-in chat assistant for navigating and querying records
-- **🎤 Voice Input** — Voice-powered field filling and data parsing
 - **📥 Import / Export** — Import records from Excel/CSV and export data back to Excel (via `xlsx`)
 - **🔐 Auth Gate** — Supabase-powered authentication to protect access
-- **☁️ Cloud Sync** — All data synced in real-time with Supabase (PostgreSQL)
 - **💻 Standalone Executable** — Packaged with Electron Packager as a Windows `.exe`
 
 ---
