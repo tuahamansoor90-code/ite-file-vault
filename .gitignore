@@ -1,0 +1,29 @@
+# Python / Node artifacts
+node_modules/
+.output/
+dist/
+dist-electron/
+out/
+build/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Database
+*.db
+*.sqlite
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
