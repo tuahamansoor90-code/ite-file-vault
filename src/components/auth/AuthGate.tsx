@@ -25,11 +25,13 @@ async function sha256(text: string): Promise<string> {
 }
 
 // Default password hash for "admin123" — never store plain text
-const DEFAULT_HASH = "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a";
+const DEFAULT_HASH = "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9";
 
 function getStoredHash(): string {
   if (typeof window === "undefined") return DEFAULT_HASH;
-  return window.localStorage.getItem(PASSWORD_KEY) ?? DEFAULT_HASH;
+  const stored = window.localStorage.getItem(PASSWORD_KEY);
+  if (!stored) return DEFAULT_HASH;
+  return stored;
 }
 
 // ── Brute-force helpers ────────────────────────────────────────────────────────
@@ -155,7 +157,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
     if (isLocked) return;
 
     const hash = await sha256(password);
-    if (hash === getStoredHash()) {
+    const stored = getStoredHash();
+    
+    // Check hash match OR legacy plain-text match
+    if (hash === stored || password === stored) {
+      // Auto-migrate legacy plain text stored password to hash
+      if (stored.length !== 64) {
+        window.localStorage.setItem(PASSWORD_KEY, hash);
+      }
       clearFailedAttempts();
       setSession();
       setAuthed(true);
@@ -175,7 +184,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const handleChangePassword = async (e: FormEvent) => {
     e.preventDefault();
     const currentHash = await sha256(password);
-    if (currentHash !== getStoredHash()) {
+    const stored = getStoredHash();
+    if (currentHash !== stored && password !== stored) {
       toast.error("Current password is incorrect");
       return;
     }
